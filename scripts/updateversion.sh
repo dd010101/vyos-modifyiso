@@ -7,7 +7,11 @@ if [ -z "$SET_VERSION" ] && [ -z "$SET_TRAIN" ] && [ -z "$SET_BUILDTYPE" ]; then
     exit 0
 fi
 
-OLD_VERSION=$(jq -r '.version' "$ISO_DIR/version.json")
+CURRENT_VERSION=$(jq -r '.version' "$ISO_DIR/version.json")
+if [ ! "$CURRENT_VERSION" ]; then
+    echo "Error! Can't figure out the current version from $ISO_DIR/version.json"
+    exit 1
+fi
 
 for f in "$ISO_DIR/version.json" "$SQUASHFS_DIR/usr/share/vyos/version.json"; do
     jq --arg version "$SET_VERSION" --arg train "$SET_TRAIN" --arg buildtype "$SET_BUILDTYPE" \
@@ -19,13 +23,16 @@ for f in "$ISO_DIR/version.json" "$SQUASHFS_DIR/usr/share/vyos/version.json"; do
     echo "Updated $f"
 done
 
-# The BIOS boot menu title includes the version string, but it's only visible
-# in limited circumstances. Update it anyway.
-if [ -n "$SET_VERSION" ] && [ "$OLD_VERSION" != "$SET_VERSION" ]; then
-    old=$(printf '%s' "$OLD_VERSION" | sed 's/[.[\*^$/]/\\&/g')
-    new=$(printf '%s' "$SET_VERSION" | sed 's/[\/&]/\\&/g')
-    sed -i "s/$old/$new/" "$ISO_DIR/isolinux/menu.cfg"
-    echo "Updated $ISO_DIR/isolinux/menu.cfg"
-fi
+# The version string also appears in a bunch of other places.
+VFILES="$ISO_DIR/isolinux/menu.cfg $ISO_DIR/.disk/info $SQUASHFS_DIR/opt/vyatta/etc/version"
+
+# Escape any /'s so we can use them in the release. But you probably shouldn't.
+new=$(printf '%s' "$SET_VERSION" | sed 's/[\/&]/\\&/g')
+old=$(printf '%s' "$CURRENT_VERSION" | sed 's/[.[\*^$/]/\\&/g')
+
+for f in $VFILES; do
+    sed -i "s/$old/$new/" $f
+    echo "Updated $f"
+done
 
 echo "version=$(jq -r '.version' "$ISO_DIR/version.json") release_train=$(jq -r '.release_train' "$ISO_DIR/version.json") build_type=$(jq -r '.build_type' "$ISO_DIR/version.json")"

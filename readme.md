@@ -114,7 +114,8 @@ You can use `--set-version`, `--set-train` and/or `--set-buildtype` to change th
 build settings, allowing you to override the ones on the source ISO.
 
 These update the `version`, `release_train` (e.g. `rolling` or `stream`) and `build_type`
-(e.g. `development` or `release`) settings.
+(e.g. `development` or `release`) settings in the `version.json` files, as well as
+the BIOS boot menu title, `.disk/info` and `/opt/vyatta/etc/version` (at least!).
 
 When any are given, `scripts/updateversion.sh` runs after `branding.sh` (if
 not disabled) and receives the values as `SET_VERSION`, `SET_TRAIN` and `SET_BUILDTYPE`.
