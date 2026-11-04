@@ -110,7 +110,8 @@ Every key from the config is exported to it as an upper-cased environment variab
 For further changes, pass your own executable with `--root-script`. It runs after
 `branding.sh`, in the same directory, with the same variables.
 
-Note! Don't modify the EFI binaries or `efi.img`, as that will break secure boot.
+IMPORTANT UEFI WARNING: Secureboot **must be disabled**, as the kernel is not
+signed by a certified key.
 
 Caution on using APT
 --
