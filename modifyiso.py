@@ -362,7 +362,7 @@ def main():
     parser.add_argument("--chroot-script", action="append", help="Script(s) to run inside chroot")
     parser.add_argument("--after-script", action="append", help="Script(s) to run after chroot on the outside")
     parser.add_argument("--custom-var", action="append",
-                        help="Custom env variable(s) to pass to scripts, formatted as MY_VAR=<value>")
+                        help="Custom env variable(s) to pass to the scripts, formatted as MY_VAR=<value>")
     parser.add_argument("--target-iso", default="auto")
     parser.add_argument("--interactive", action="store_true")
     parser.add_argument("--hostname")
