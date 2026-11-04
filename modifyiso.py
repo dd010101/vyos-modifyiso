@@ -18,7 +18,7 @@ class ModifyIso:
                  target_iso, interactive=False, hostname="vyos",
                  skip_extract=False, skip_chroot=False, skip_iso=False, stdout_only=False):
         self.source_iso: str = os.path.realpath(source_iso)
-        self.temp_dir = temp_dir
+        self.temp_dir: str = os.path.realpath(temp_dir)
         self.before_scripts = before_scripts
         self.chroot_scripts = chroot_scripts
         self.after_scripts = after_scripts
@@ -175,10 +175,7 @@ class ModifyIso:
         self.generate_checksums(self.iso_dir)
 
         self.logger.info("Generating ISO")
-        target_iso_path = self.target_iso
-        if target_iso_path == "auto":
-            parts = os.path.splitext(self.source_iso)
-            target_iso_path = "%s-custom%s" % parts
+        target_iso_path = self.get_target_iso_path()
 
         if os.path.exists(target_iso_path):
             os.remove(target_iso_path)
@@ -309,6 +306,7 @@ class ModifyIso:
                 "ISO_DIR": self.iso_dir,
                 "SQUASHFS_DIR": self.squashfs_dir,
                 "SOURCE_ISO": self.source_iso,
+                "TARGET_ISO": self.get_target_iso_path(),
             })
             for custom_var in self.custom_vars:
                 key, value = custom_var.split("=", 1)
@@ -334,6 +332,13 @@ class ModifyIso:
         if process.stdout is None:
             return None
         return process.stdout.read().decode("utf-8")
+
+    def get_target_iso_path(self):
+        target_iso_path = self.target_iso
+        if target_iso_path == "auto":
+            parts = os.path.splitext(self.source_iso)
+            target_iso_path = "%s-custom%s" % parts
+        return os.path.abspath(target_iso_path)
 
 
 class ProcessException(Exception):
