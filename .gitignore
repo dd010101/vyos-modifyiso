@@ -1,3 +1,7 @@
 /build/*
 /scripts/*
 !/scripts/example.sh
+!/scripts/example-zerotier.sh
+!/scripts/example-root.sh
+!/scripts/branding.sh
+/modifyiso.conf
