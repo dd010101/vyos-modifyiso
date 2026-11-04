@@ -14,11 +14,15 @@ from typing import Union, Optional
 class ModifyIso:
     logger = logging
 
-    def __init__(self, source_iso, temp_dir, chroot_script, target_iso, interactive=False, hostname="vyos",
+    def __init__(self, source_iso, temp_dir, before_scripts, chroot_scripts, after_scripts, custom_vars,
+                 target_iso, interactive=False, hostname="vyos",
                  skip_extract=False, skip_chroot=False, skip_iso=False, stdout_only=False):
         self.source_iso: str = os.path.realpath(source_iso)
         self.temp_dir = temp_dir
-        self.chroot_script = chroot_script
+        self.before_scripts = before_scripts
+        self.chroot_scripts = chroot_scripts
+        self.after_scripts = after_scripts
+        self.custom_vars = custom_vars
         self.target_iso = target_iso
         self.interactive = interactive
         self.hostname = hostname
@@ -71,6 +75,11 @@ class ModifyIso:
         os.chdir(self.original_working_dir)
         self.logger.info("Preparing chroot")
 
+        for script_path in self.before_scripts:
+            script_path = self.check_script(script_path)
+            self.logger.info("Executing before script '%s'" % script_path)
+            self.execute([script_path], include_variables=True)
+
         apt_sources_path = os.path.join(self.squashfs_dir, "etc/apt/sources.list")
         apt_sources_backup_path = "%s.bak" % apt_sources_path
         if not os.path.exists(apt_sources_backup_path):
@@ -100,30 +109,42 @@ class ModifyIso:
             target = os.path.join(self.squashfs_dir, directory)
             self.execute(["/usr/bin/mount", "--bind", os.path.join("/", directory), target])
 
-        temp_script_path = os.path.join(self.squashfs_dir, "custom.sh")
-        chroot_temp_script_path = temp_script_path[len(self.squashfs_dir):]
-        if self.chroot_script:
-            shutil.copy2(self.chroot_script, temp_script_path)
+        temp_script_root = os.path.join(self.squashfs_dir, "tmp", "custom-scripts")
+        os.makedirs(temp_script_root, exist_ok=True)
+        chroot_temp_scripts = []
+        chroot_script: str
+        for chroot_script in self.chroot_scripts:
+            chroot_script = self.check_script(chroot_script)
+
+            temp_script_path = os.path.join(temp_script_root, os.path.basename(chroot_script))
+            chroot_temp_script_path = temp_script_path[len(self.squashfs_dir):]
+            chroot_temp_scripts.append((chroot_temp_script_path, chroot_script))
+
+            shutil.copy2(chroot_script, temp_script_path)
             os.chmod(temp_script_path, 0o755)
 
         try:
             self.logger.info("Executing chroot '%s'" % self.squashfs_dir)
 
             if self.hostname:
-                import unshare
-                unshare.unshare(unshare.CLONE_NEWUTS)
+                try:
+                    import unshare
+                    unshare.unshare(unshare.CLONE_NEWUTS)
+                except ImportError:
+                    pass
                 self.execute(["/usr/bin/hostname", self.hostname])
 
-            if self.chroot_script:
-                self.execute(["/usr/sbin/chroot", self.squashfs_dir, "/bin/sh", "-c", chroot_temp_script_path])
+            for chroot_path, original_path in chroot_temp_scripts:
+                self.logger.info("Executing chroot script '%s' as '%s'" % (original_path, chroot_path))
+                self.execute(["/usr/sbin/chroot", self.squashfs_dir, chroot_path], include_variables=True)
 
             if self.interactive:
                 self.execute(["/usr/sbin/chroot", self.squashfs_dir, "/bin/sh"], stdin=sys.stdin)
 
             self.logger.info("Cleaning chroot")
 
-            if os.path.exists(temp_script_path):
-                os.remove(temp_script_path)
+            if os.path.exists(temp_script_root):
+                shutil.rmtree(temp_script_root)
 
             os.remove(apt_sources_path)
             os.rename(apt_sources_backup_path, apt_sources_path)
@@ -135,6 +156,11 @@ class ModifyIso:
             for directory in ["dev", "proc", "sys"]:
                 target = os.path.join(self.squashfs_dir, directory)
                 self.execute(["/usr/bin/umount", "-l", target], valid_codes=[0, 32])
+
+        for script_path in self.after_scripts:
+            script_path = self.check_script(script_path)
+            self.logger.info("Executing before script '%s'" % script_path)
+            self.execute([script_path], include_variables=True)
 
     def generate_iso(self):
         self.logger.info("Generating squashfs")
@@ -252,7 +278,20 @@ class ModifyIso:
         for mount_point in related_mounts:
             self.umount(mount_point)
 
-    def execute(self, command, valid_codes: Optional[Union[int, list]] = 0, timeout=0, **kwargs) -> Optional[str]:
+    def check_script(self, script_path: str):
+        try:
+            script_path = os.path.realpath(script_path)
+        except FileNotFoundError:
+            raise ErrorException("Script '%s' does not exist" % script_path)
+
+        if not os.access(script_path, os.X_OK):
+            raise ErrorException("Script '%s' is not executable" % script_path)
+
+        return script_path
+
+    def execute(self, command, valid_codes: Optional[Union[int, list]] = 0, timeout=0, include_variables=False,
+                **kwargs) -> Optional[str]:
+
         if "stdout" not in kwargs:
             kwargs.update({
                 "stdout": sys.stdout,
@@ -262,6 +301,19 @@ class ModifyIso:
 
         if "stderr" not in kwargs:
             kwargs["stderr"] = subprocess.DEVNULL
+
+        if include_variables:
+            modified_env = os.environ.copy()
+            modified_env.update({
+                "TEMP_DIR": self.temp_dir,
+                "ISO_DIR": self.iso_dir,
+                "SQUASHFS_DIR": self.squashfs_dir,
+                "SOURCE_ISO": self.source_iso,
+            })
+            for custom_var in self.custom_vars:
+                key, value = custom_var.split("=", 1)
+                modified_env[key] = value
+            kwargs["env"] = modified_env
 
         process = subprocess.Popen(command, **kwargs)
 
@@ -306,7 +358,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("source_iso")
     parser.add_argument("--temp-dir", default=os.path.join(project_dir, "build"))
-    parser.add_argument("--chroot-script")
+    parser.add_argument("--before-script", action="append", help="Script(s) to run before chroot on the outside")
+    parser.add_argument("--chroot-script", action="append", help="Script(s) to run inside chroot")
+    parser.add_argument("--after-script", action="append", help="Script(s) to run after chroot on the outside")
+    parser.add_argument("--custom-var", action="append",
+                        help="Custom env variable(s) to pass to scripts, formatted as MY_VAR=<value>")
     parser.add_argument("--target-iso", default="auto")
     parser.add_argument("--interactive", action="store_true")
     parser.add_argument("--hostname")
@@ -316,6 +372,10 @@ def main():
 
     args = parser.parse_args()
     values = vars(args)
+
+    for list_key in ["before_script", "chroot_script", "after_script", "custom_var"]:
+        values["%ss" % list_key] = getattr(args, list_key) or []
+        del values[list_key]
 
     ModifyIso(**values).run()
 

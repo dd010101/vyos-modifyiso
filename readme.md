@@ -9,8 +9,8 @@ Utility for customizing existing VyOS images
 This utility allows unpacking VyOS ISO image, modifying it within a chroot environment, 
 and repacking it into a new ISO image.
 
-The process isn't exactly straightforward. Especially if we intended to keep the VyOS upgrade mechanism intact 
-and also to avoid breaking secure boot compatibility as far as possible. That's why this utility was created.
+The process isn't exactly straightforward. Especially if we intended to keep the VyOS upgrade mechanism intact.
+That's why this utility was created.
 
 Modifying existing images may be useful as an alternative to building a new image and all packages from scratch 
 with the aim to have customized images. Especially for VyOS Stream where building all packages is unfriendly, 
@@ -19,10 +19,16 @@ time-consuming, and there isn't an official nor reliable method to do so straigh
 Usage
 --
 
+Switch to root, this is required since we need to install packages, manipulate mounts and use chroot:
+
+```shell
+sudo -i
+```
+
 Install additional required tools above the base system:
 
 ```shell
-sudo apt-get install squashfs-tools xorriso git
+apt-get install squashfs-tools xorriso git
 ```
 
 Get the utility:
@@ -37,16 +43,23 @@ Get image to modify:
 wget https://community-downloads.vyos.dev/stream/2026.03/vyos-2026.03-generic-amd64.iso
 ```
 
-Prepare your chroot script. For demonstration, we will use the example script `./scripts/example.sh`.
+Prepare your chroot script. For demonstration, we will use the examples scripts from `./scripts/`.
 
 ```shell
-sudo ./vyos-modifyiso/modifyiso.py ./vyos-2026.03-generic-amd64.iso --chroot-script ./vyos-modifyiso/scripts/example.sh
+./vyos-modifyiso/modifyiso.py ./vyos-2026.03-generic-amd64.iso \
+  --before-script ./vyos-modifyiso/scripts/example-before.sh \
+  --chroot-script ./vyos-modifyiso/scripts/example-chroot.sh \
+  --after-script ./vyos-modifyiso/scripts/example-after.sh \
+  --custom-var "TEST=hello world"
 ```
+
+All script options can be specified multiple times, this includes `--before-script`, `--chroot-script`
+and `--after-script`. This also applies to `--custom-var` option.
 
 If there is a need to interact with the chroot manually, we can use `--interactive` option.
 
 ```shell
-sudo ./vyos-modifyiso/modifyiso.py ./vyos-2026.03-generic-amd64.iso --interactive
+./vyos-modifyiso/modifyiso.py ./vyos-2026.03-generic-amd64.iso --interactive
 ```
 
 After the interactive shell exists successfully, the process of assembling the image continues.

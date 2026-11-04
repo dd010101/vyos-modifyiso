@@ -1,5 +1,7 @@
-#!/bin/sh
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "I run inside chroot"
 
 # basics
 export DEBIAN_FRONTEND=noninteractive
