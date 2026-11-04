@@ -12,7 +12,7 @@ if [ ! "$HOSTNAME" ]; then
 	export HOSTNAME=vyos
 fi
 
-sed -i -r -e "s/\(vyos\)/\($BRAND\)/i" -e "s/hostname=vyos/hostname=$HOSTNAME/" "$ISO_DIR/boot/grub/grub.cfg"
+sed -i -r -e "s/\(vyos/\($BRAND/i" -e "s/hostname=vyos/hostname=$HOSTNAME/" "$ISO_DIR/boot/grub/grub.cfg"
 sed -i -r "s/VyOS/$BRAND/" "$ISO_DIR/isolinux/menu.cfg"
 sed -i -r -e "s/\(vyos/\($BRAND/i" -e "s/hostname=vyos/hostname=$HOSTNAME/" "$ISO_DIR/isolinux/live.cfg"
 
@@ -25,8 +25,8 @@ done
 cat > squashfs/usr/share/vyos/templates/login/motd_vyos_nonproduction.j2 << EOF
 
 ---
-WARNING: This system and software is based on, but unrelated to, the VyOS project.
-         Do not attempt to contact them for support.
+WARNING: This system and software is based on, but unrelated to, the VyOS
+         project.  Do not contact them for support!
 EOF
 
 echo "Brand is now $BRAND and hostname is $HOSTNAME"
