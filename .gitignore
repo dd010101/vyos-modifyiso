@@ -4,4 +4,5 @@
 !/scripts/example-zerotier.sh
 !/scripts/example-root.sh
 !/scripts/branding.sh
+!/scripts/updateversion.sh
 /modifyiso.conf

@@ -107,8 +107,26 @@ Every key from the config is exported to it as an upper-cased environment variab
 | `SQUASHFS_DIR` | extracted root filesystem (`$TEMP_DIR/squashfs`) |
 | `SOURCE_ISO`   | path of the source ISO                           |
 
+
+Overriding the build version
+--
+You can use `--set-version`, `--set-train` and/or `--set-buildtype` to change the
+build settings, allowing you to override the ones on the source ISO.
+
+These update the `version`, `release_train` (e.g. `rolling` or `stream`) and `build_type`
+(e.g. `development` or `release`) settings.
+
+When any are given, `scripts/updateversion.sh` runs after `branding.sh` (if
+not disabled) and receives the values as `SET_VERSION`, `SET_TRAIN` and `SET_BUILDTYPE`.
+
+```shell
+./vyos-modifyiso/modifyiso.py ./vyos-2026.03-generic-amd64.iso --set-version 2026.03-custom1 --set-train circinus --set-buildtype release
+```
+
+Root script
+--
 For further changes, pass your own executable with `--root-script`. It runs after
-`branding.sh`, in the same directory, with the same variables.
+`branding.sh` (and `updateversion.sh`), in the same directory, with the same variables.
 
 IMPORTANT UEFI WARNING: Secureboot **must be disabled**, as the kernel is not
 signed by a certified key.

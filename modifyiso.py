@@ -15,6 +15,7 @@ from typing import Union, Optional
 PROJECT_DIR = os.path.realpath(os.path.dirname(__file__))
 DEFAULT_CONFIG_PATH = os.path.join(PROJECT_DIR, "modifyiso.conf")
 DEFAULT_BRANDING_SCRIPT = os.path.join(PROJECT_DIR, "scripts", "branding.sh")
+DEFAULT_VERSION_SCRIPT = os.path.join(PROJECT_DIR, "scripts", "updateversion.sh")
 
 CONFIG_SECTION = "branding"
 # Every key in the [branding] section is exported, upper-cased, to the branding and root scripts.
@@ -64,7 +65,8 @@ class ModifyIso:
 
     def __init__(self, source_iso, temp_dir, chroot_script, target_iso, interactive=False,
                  skip_extract=False, skip_chroot=False, skip_iso=False, stdout_only=False, root_script=None,
-                 config=None, branding_script=DEFAULT_BRANDING_SCRIPT, no_branding=False):
+                 config=None, branding_script=DEFAULT_BRANDING_SCRIPT, no_branding=False,
+                 set_version=None, set_train=None, set_buildtype=None, version_script=DEFAULT_VERSION_SCRIPT):
         self.source_iso: str = os.path.realpath(source_iso)
         self.temp_dir = os.path.realpath(temp_dir)
         self.chroot_script = chroot_script
@@ -78,6 +80,10 @@ class ModifyIso:
         self.skip_chroot = skip_chroot
         self.skip_iso = skip_iso
         self.no_branding = no_branding
+        self.set_version = set_version
+        self.set_train = set_train
+        self.set_buildtype = set_buildtype
+        self.version_script = os.path.realpath(version_script)
         self.stdout_only = stdout_only
 
         self.mount_dir = os.path.join(self.temp_dir, "mount")
@@ -87,6 +93,8 @@ class ModifyIso:
 
         if not self.no_branding:
             self.check_executable(self.branding_script, "Branding script")
+        if self.set_version or self.set_train or self.set_buildtype:
+            self.check_executable(self.version_script, "Version script")
         if self.root_script:
             self.check_executable(self.root_script, "Root script")
 
@@ -106,6 +114,10 @@ class ModifyIso:
 
         if not self.no_branding:
             self.execute_host_script(self.branding_script, "branding script")
+
+        # After branding.sh, which regenerates version.json from the original
+        if self.set_version or self.set_train or self.set_buildtype:
+            self.execute_host_script(self.version_script, "version script")
 
         if self.root_script:
             self.execute_host_script(self.root_script, "root script")
@@ -213,6 +225,12 @@ class ModifyIso:
             SQUASHFS_DIR=self.squashfs_dir,
             SOURCE_ISO=self.source_iso,
         )
+        if self.set_version:
+            env["SET_VERSION"] = self.set_version
+        if self.set_train:
+            env["SET_TRAIN"] = self.set_train
+        if self.set_buildtype:
+            env["SET_BUILDTYPE"] = self.set_buildtype
         self.execute([script], cwd=self.temp_dir, env=env)
 
     def generate_iso(self):
@@ -392,6 +410,9 @@ def main():
     parser.add_argument("--skip-chroot", action="store_true")
     parser.add_argument("--skip-iso", action="store_true")
     parser.add_argument("--no-branding", action="store_true")
+    parser.add_argument("--set-version")
+    parser.add_argument("--set-train")
+    parser.add_argument("--set-buildtype")
 
     args = parser.parse_args()
     values = vars(args)
