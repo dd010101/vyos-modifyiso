@@ -9,20 +9,28 @@ Utility for customizing existing VyOS images
 This utility allows unpacking VyOS ISO image, modifying it within a chroot environment, 
 and repacking it into a new ISO image.
 
-The process isn't exactly straightforward. Especially if we intended to keep the VyOS upgrade mechanism intact 
-and also to avoid breaking secure boot compatibility as far as possible. That's why this utility was created.
+The process isn't exactly straightforward. Especially if we intended to keep the
+VyOS upgrade mechanism intact and also to avoid breaking secure boot compatibility
+as far as possible. That's why this utility was created.
 
-Modifying existing images may be useful as an alternative to building a new image and all packages from scratch 
-with the aim to have customized images. Especially for VyOS Stream where building all packages is unfriendly, 
-time-consuming, and there isn't an official nor reliable method to do so straightforwardly.
+Modifying existing images may be useful as an alternative to building a new image
+and all packages from scratch with the aim to have customized images. Especially
+for VyOS Stream where building all packages is unfriendly, time-consuming, and
+there isn't an official nor reliable method to do so straightforwardly.
 
 Usage
 --
 
+Switch to root to allow all commands to run correctly.
+
+```shell
+sudo -i
+```
+
 Install additional required tools above the base system:
 
 ```shell
-sudo apt-get install squashfs-tools xorriso git
+apt-get install squashfs-tools xorriso jq git
 ```
 
 Get the utility:
@@ -37,10 +45,12 @@ Get image to modify:
 wget https://community-downloads.vyos.dev/stream/2026.03/vyos-2026.03-generic-amd64.iso
 ```
 
-Prepare your chroot script. For demonstration, we will use the example script `./scripts/example.sh`.
+Prepare your chroot script. For demonstration, we will use the example script
+`./scripts/example.sh` which simply installs a few extra packages. Refer to the
+`./scripts/example-zerotier.sh` script for a more complex patchset.
 
 ```shell
-sudo ./vyos-modifyiso/modifyiso.py ./vyos-2026.03-generic-amd64.iso --chroot-script ./vyos-modifyiso/scripts/example.sh
+./vyos-modifyiso/modifyiso.py ./vyos-2026.03-generic-amd64.iso --chroot-script ./vyos-modifyiso/scripts/example.sh
 ```
 
 If there is a need to interact with the chroot manually, we can use `--interactive` option.
@@ -49,10 +59,78 @@ If there is a need to interact with the chroot manually, we can use `--interacti
 sudo ./vyos-modifyiso/modifyiso.py ./vyos-2026.03-generic-amd64.iso --interactive
 ```
 
-After the interactive shell exists successfully, the process of assembling the image continues.
-This can be also mixed with `--chroot-script` option, then the script will be executed first.
-The `--interactive` option presents a limited shell, if there is a need for a full shell, then use the `--interactive`
-option, wait for the utility to enter the limited shell, and enter the chroot manually from another shell.
+After the interactive shell exists successfully, the process of assembling the
+image continues.
+
+This can be also mixed with `--chroot-script` option, which will be executed first,
+before branding is applied.
+
+The `--interactive` option presents a limited shell, if there is a need for a
+full shell, then use the `--interactive` option, wait for the utility to enter
+the limited shell, and enter the chroot manually from another shell.
+
+Configuration and branding
+--
+
+On the first run, `modifyiso.conf` is generated with default values.  Use `--config`
+to point at a different file (which will be created if it does not exist) so you
+can easily build multiple variations.
+
+```ini
+[branding]
+brand = PhoneBo.cx
+hostname = phonebocx
+splash =
+bugtracker_url = https://example.com
+documentation_url = https://example.com
+project_news_url = https://example.com
+support_url = https://example.com
+```
+
+Note that `splash` is should be a path to a PNG; a relative path is relative to
+the config file's directory. Leave it empty to keep the original logo.
+
+After the chroot step, `./scripts/branding.sh` runs. Use `--no-branding` to skip it.
+
+This uses `scripts/branding.sh` to changes the brand name in various places inside
+the image, such as the boot menus and login messages. It also updates the default
+config (removing the legacy serial console), and updates both `version.json`
+files.
+
+Every key from the config is exported to it as an upper-cased environment variable
+(`BRAND`, `HOSTNAME`, `SPLASH`, `BUGTRACKER_URL`, ...), together with:
+
+| Variable       | Content                                          |
+|----------------|--------------------------------------------------|
+| `TEMP_DIR`     | the temp directory, also the working directory   |
+| `ISO_DIR`      | extracted ISO tree (`$TEMP_DIR/iso`)             |
+| `SQUASHFS_DIR` | extracted root filesystem (`$TEMP_DIR/squashfs`) |
+| `SOURCE_ISO`   | path of the source ISO                           |
+
+
+Overriding the build version
+--
+You can use `--set-version`, `--set-train` and/or `--set-buildtype` to change the
+build settings, allowing you to override the ones on the source ISO.
+
+These update the `version`, `release_train` (e.g. `rolling` or `stream`) and `build_type`
+(e.g. `development` or `release`) settings in the `version.json` files, as well as
+the BIOS boot menu title, `.disk/info` and `/opt/vyatta/etc/version` (at least!).
+
+When any are given, `scripts/updateversion.sh` runs after `branding.sh` (if
+not disabled) and receives the values as `SET_VERSION`, `SET_TRAIN` and `SET_BUILDTYPE`.
+
+```shell
+./vyos-modifyiso/modifyiso.py ./vyos-2026.03-generic-amd64.iso --set-version 2026.03-custom1 --set-train circinus --set-buildtype release
+```
+
+Root script
+--
+For further changes, pass your own executable with `--root-script`. It runs after
+`branding.sh` (and `updateversion.sh`), in the same directory, with the same variables.
+
+IMPORTANT UEFI WARNING: Secureboot **must be disabled**, as the kernel is not
+signed by a certified key.
 
 Caution on using APT
 --

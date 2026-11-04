@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import configparser
 import logging
 import os
 import re
@@ -11,20 +12,78 @@ from time import monotonic, sleep
 from typing import Union, Optional
 
 
+PROJECT_DIR = os.path.realpath(os.path.dirname(__file__))
+DEFAULT_CONFIG_PATH = os.path.join(PROJECT_DIR, "modifyiso.conf")
+DEFAULT_BRANDING_SCRIPT = os.path.join(PROJECT_DIR, "scripts", "branding.sh")
+DEFAULT_VERSION_SCRIPT = os.path.join(PROJECT_DIR, "scripts", "updateversion.sh")
+
+CONFIG_SECTION = "branding"
+# Every key in the [branding] section is exported, upper-cased, to the branding and root scripts.
+DEFAULT_CONFIG = {
+    "brand": "PhoneBo.cx",
+    "hostname": "phonebocx",
+    "splash": "",
+    "bugtracker_url": "https://example.com",
+    "documentation_url": "https://example.com",
+    "project_news_url": "https://example.com",
+    "support_url": "https://example.com",
+}
+
+def load_config(path):
+    """Read the config file, creating it with defaults if missing. Returns the [branding] values."""
+    parser = configparser.ConfigParser(interpolation=None)
+    if not os.path.exists(path):
+        parser[CONFIG_SECTION] = DEFAULT_CONFIG
+        with open(path, "w") as file:
+            file.write("# vyos-modifyiso configuration. Every key below is exported, upper-cased\n")
+            file.write("# (e.g. brand -> BRAND), to scripts/branding.sh and the --root-script.\n")
+            file.write("# A relative splash path is relative to this file's directory.\n\n")
+            parser.write(file)
+        logging.info("Generated default config '%s'" % path)
+
+    try:
+        parser.read(path)
+    except configparser.Error as e:
+        raise ErrorException("Invalid config '%s': %s" % (path, e))
+    if not parser.has_section(CONFIG_SECTION):
+        raise ErrorException("Config '%s' has no [%s] section" % (path, CONFIG_SECTION))
+
+    values = dict(DEFAULT_CONFIG)
+    values.update(parser[CONFIG_SECTION])
+
+    if values["splash"]:
+        splash = os.path.join(os.path.dirname(os.path.realpath(path)), values["splash"])
+        if not os.path.isfile(splash):
+            raise ErrorException("Splash image '%s' doesn't exist" % splash)
+        values["splash"] = splash
+
+    return values
+
+
 class ModifyIso:
     logger = logging
 
-    def __init__(self, source_iso, temp_dir, chroot_script, target_iso, interactive=False, hostname="vyos",
-                 skip_extract=False, skip_chroot=False, skip_iso=False, stdout_only=False):
+    def __init__(self, source_iso, temp_dir, chroot_script, target_iso, interactive=False,
+                 skip_extract=False, skip_chroot=False, skip_iso=False, stdout_only=False, root_script=None,
+                 config=None, branding_script=DEFAULT_BRANDING_SCRIPT, no_branding=False,
+                 set_version=None, set_train=None, set_buildtype=None, version_script=DEFAULT_VERSION_SCRIPT):
         self.source_iso: str = os.path.realpath(source_iso)
-        self.temp_dir = temp_dir
+        self.temp_dir = os.path.realpath(temp_dir)
         self.chroot_script = chroot_script
+        self.root_script = os.path.realpath(root_script) if root_script else None
+        self.branding_script = os.path.realpath(branding_script)
+        self.config = dict(config or {})
         self.target_iso = target_iso
         self.interactive = interactive
-        self.hostname = hostname
+        self.hostname = self.config.get("hostname")
         self.skip_extract = skip_extract
         self.skip_chroot = skip_chroot
         self.skip_iso = skip_iso
+        self.no_branding = no_branding
+        self.set_version = set_version
+        self.set_train = set_train
+        self.set_buildtype = set_buildtype
+        self.version_script = os.path.realpath(version_script)
         self.stdout_only = stdout_only
 
         self.mount_dir = os.path.join(self.temp_dir, "mount")
@@ -32,12 +91,36 @@ class ModifyIso:
         self.squashfs_dir = os.path.join(self.temp_dir, "squashfs")
         self.original_working_dir = os.getcwd()
 
+        if not self.no_branding:
+            self.check_executable(self.branding_script, "Branding script")
+        if self.set_version or self.set_train or self.set_buildtype:
+            self.check_executable(self.version_script, "Version script")
+        if self.root_script:
+            self.check_executable(self.root_script, "Root script")
+
+    @staticmethod
+    def check_executable(path, label):
+        if not os.path.isfile(path):
+            raise ErrorException("%s '%s' doesn't exist" % (label, path))
+        if not os.access(path, os.X_OK):
+            raise ErrorException("%s '%s' isn't executable" % (label, path))
+
     def run(self):
         if not self.skip_extract:
             self.mount_and_extract()
 
         if not self.skip_chroot:
             self.execute_chroot()
+
+        if not self.no_branding:
+            self.execute_host_script(self.branding_script, "branding script")
+
+        # After branding.sh, which regenerates version.json from the original
+        if self.set_version or self.set_train or self.set_buildtype:
+            self.execute_host_script(self.version_script, "version script")
+
+        if self.root_script:
+            self.execute_host_script(self.root_script, "root script")
 
         if not self.skip_iso:
             self.generate_iso()
@@ -109,11 +192,6 @@ class ModifyIso:
         try:
             self.logger.info("Executing chroot '%s'" % self.squashfs_dir)
 
-            if self.hostname:
-                import unshare
-                unshare.unshare(unshare.CLONE_NEWUTS)
-                self.execute(["/usr/bin/hostname", self.hostname])
-
             if self.chroot_script:
                 self.execute(["/usr/sbin/chroot", self.squashfs_dir, "/bin/sh", "-c", chroot_temp_script_path])
 
@@ -135,6 +213,25 @@ class ModifyIso:
             for directory in ["dev", "proc", "sys"]:
                 target = os.path.join(self.squashfs_dir, directory)
                 self.execute(["/usr/bin/umount", "-l", target], valid_codes=[0, 32])
+
+    def execute_host_script(self, script, label):
+        self.logger.info("Executing %s '%s' in '%s'" % (label, script, self.temp_dir))
+
+        env = dict(os.environ)
+        env.update({key.upper(): str(value) for key, value in self.config.items()})
+        env.update(
+            TEMP_DIR=self.temp_dir,
+            ISO_DIR=self.iso_dir,
+            SQUASHFS_DIR=self.squashfs_dir,
+            SOURCE_ISO=self.source_iso,
+        )
+        if self.set_version:
+            env["SET_VERSION"] = self.set_version
+        if self.set_train:
+            env["SET_TRAIN"] = self.set_train
+        if self.set_buildtype:
+            env["SET_BUILDTYPE"] = self.set_buildtype
+        self.execute([script], cwd=self.temp_dir, env=env)
 
     def generate_iso(self):
         self.logger.info("Generating squashfs")
@@ -301,21 +398,25 @@ class ProcessException(Exception):
 
 
 def main():
-    project_dir = os.path.realpath(os.path.dirname(__file__))
-
     parser = argparse.ArgumentParser()
     parser.add_argument("source_iso")
-    parser.add_argument("--temp-dir", default=os.path.join(project_dir, "build"))
+    parser.add_argument("--temp-dir", default=os.path.join(PROJECT_DIR, "build"))
+    parser.add_argument("--config", default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--chroot-script")
+    parser.add_argument("--root-script")
     parser.add_argument("--target-iso", default="auto")
     parser.add_argument("--interactive", action="store_true")
-    parser.add_argument("--hostname")
     parser.add_argument("--skip-extract", action="store_true")
     parser.add_argument("--skip-chroot", action="store_true")
     parser.add_argument("--skip-iso", action="store_true")
+    parser.add_argument("--no-branding", action="store_true")
+    parser.add_argument("--set-version")
+    parser.add_argument("--set-train")
+    parser.add_argument("--set-buildtype")
 
     args = parser.parse_args()
     values = vars(args)
+    values["config"] = load_config(values["config"])
 
     ModifyIso(**values).run()
 
